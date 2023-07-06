@@ -1,0 +1,138 @@
+{{ $paramName := .Get 0 }}
+{{ $schemaName := .Page.Params.schemaname }}
+
+{{ if $paramName }}
+    {{ template "getComponent" $paramName }}
+{{ else if $schemaName }}
+    {{ template "getComponent" $schemaName }}
+{{ else }}
+    <em>Component name missing.</em>
+{{ end }}
+
+{{ define "getComponent" }}
+    {{ $componentName := . }}
+    {{ $baseURL := "https://raw.githubusercontent.com/Altinn/app-frontend-react/chore/update-component-schemas/schemas/json/component/"}}
+    {{ $fileExtension := ".schema.v1.json" }}
+
+    {{ with getJSON $baseURL $componentName $fileExtension }}
+        {{ $jsonSchema := getJSON $baseURL $componentName $fileExtension }}
+
+        {{ $componentProps := index $jsonSchema "properties" }}
+        {{ $requiredProps := index $jsonSchema "required" }}
+
+        {{ with $requiredProps }}
+            <strong>Required properties</strong>: <code>{{ delimit $requiredProps ", " }}</code>
+        {{ end }}
+        
+        {{ template "listProperties" $componentProps }}
+    {{ else }}
+        <em>Failed to retrieve json schema for '{{ $componentName }}'. Make sure the component schemaname is spelled correctly.</em>
+    {{ end }}
+{{ end }}
+
+{{ define "listProperties" }}
+    {{ $props := . }}
+
+    {{ $orderedTitles := slice "type" "title" "description" "default" "required" "pattern" "minimum" "maximum" "examples" "enum" "items" "additionalProperties" "properties" "required" "$ref" }}
+    
+    {{ range $propertyName, $property := $props }}
+    
+        <h3><code>{{ $propertyName }}</code></h3>
+    
+        {{ range $title := $orderedTitles }}
+            {{ $description := index $property $title }}
+            {{ if $description }}
+                {{ if eq $title "$ref" }}
+                    {{ template "followRef" (dict "ref" $description "orderedTitles" $orderedTitles) }}
+                {{ else }}
+                    <strong>{{ $title }}</strong>
+                 
+                    {{ if eq $title "examples"}}
+                        {{ template "formatExample" (slice $description) }}
+                    {{ else if eq $title "enum" }}
+                        : [{{ delimit $description ", " }}]<br>
+                    {{ else }}
+                        {{ template "recurNestedProps" (slice $description $orderedTitles) }}
+                    {{ end }}
+                {{ end }}
+            {{ end }}
+        {{ end }}
+    {{ end }}
+{{ end }}
+
+
+{{ define "recurNestedProps" }}
+    {{ $property := index . 0 }}
+    {{ $orderedTitles := index . 1 }}
+
+    {{/*  {{ if or (eq (printf "%T" $property) "map[string]interface {}") (eq (printf "%T" $property) "[]interface {}") }}  */}}
+    {{ if eq (printf "%T" $property) "map[string]interface {}" }}
+        
+        {{ range $title := $orderedTitles }}
+        {{ $description := index $property $title }}
+            {{ if $description }}
+                {{ if eq $title "$ref" }}
+                    {{ template "followRef" (dict "ref" $description "orderedTitles" $orderedTitles) }}
+                {{ else if eq $title "examples"}}
+                    {{ template "formatExample" (slice $description) }}
+                {{ else if eq $title "enum" }}
+                    <ul>
+                        <li><strong>{{ $title }}</strong>: [{{ delimit $description ", " }}]<br></li>
+                    </ul>
+                {{ else }}
+                    <ul>
+                        <li><strong>{{ $title }}</strong>{{ template "recurNestedProps" (slice $description $orderedTitles) }}</li>
+                    </ul>
+                {{ end }}
+            {{ end }}
+        {{ end }}
+            
+    {{ else if eq (printf "%T" $property) "[]interface {}" }}
+        : {{ delimit $property ", " }}<br>
+    {{ else }}
+        : {{ $property }}<br>
+    {{ end }}
+{{ end }}
+
+{{ define "followRef" }}
+
+    {{ $ref := .ref }}
+    {{ $orderedTitles :=  .orderedTitles }}
+
+    {{ $split := split $ref "/" }}
+    {{ $refComponent := index $split (sub (len $split) 1) }}
+    
+    {{ $split1 := split $ref "#" }}
+    {{ if eq (index $split1 0) "expression.schema.v1.json"}}
+        <ul>
+            <li><strong>ref. type</strong>: {{ $refComponent }}</li>
+        </ul>
+    {{ else }}
+        {{ if eq $refComponent "gridSettings"}}
+            <strong>reference</strong>: (Link to gridSettings) <br>
+        {{ else }}
+            {{ $jsonCommonDefs := getJSON "https://raw.githubusercontent.com/Altinn/app-frontend-react/chore/update-component-schemas/schemas/json/component/common-defs.schema.v1.json" }}
+            {{ $defs := index $jsonCommonDefs "$defs" }}
+            {{ $componentProps := index $defs $refComponent }}
+            {{ range $title := $orderedTitles }}
+            {{ $description := index $componentProps $title }}
+                {{ if $description }}
+                    <strong>{{ $title }}</strong>
+                    {{ template "recurNestedProps" (slice $description $orderedTitles) }}
+                {{ end }}
+            {{ end }}
+        {{ end }}
+    {{ end }}
+{{ end }}
+
+{{ define "formatExample" }}
+    {{ $description := index . 0 }}
+    {{ $descriptionType := printf "%T" (index $description 0) }}
+
+    {{ if eq $descriptionType  "map[string]interface {}" }}
+        {{ $map := index $description 0 }}
+        {{ range $key, $val := $map }}<ul><li><code>{{ $key }}: {{ $val }}</code></li></ul>{{ end }}
+    {{ else  }}
+       {{ range $val := $description }}<ul><li><code>{{ $val }}</code></li></ul>{{ end }}
+    {{ end }}
+{{ end }}
